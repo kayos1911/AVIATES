@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>N9474W — AVIATES Inspection Tracker</title>
+<style>
+:root { --bg:#f4f6f8; --card:#fff; --text:#17212b; --muted:#66727e; --line:#dce2e7; --good:#16794c; --warn:#b56a00; --bad:#b3261e; --accent:#155eef; }
+*{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
+header{background:#14212b;color:#fff;padding:22px 18px 18px} header h1{margin:0;font-size:25px} header p{margin:5px 0 0;color:#cbd5dc}
+main{max-width:1000px;margin:auto;padding:16px}
+.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.stat,.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 1px 2px #0000000b}
+.stat b{display:block;font-size:25px}.stat span{color:var(--muted);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.card h2{margin:0 0 10px;font-size:18px}.item{border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.name{font-weight:700}.sub{font-size:13px;color:var(--muted);margin-top:4px}
+.badge{padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}.good{background:#e5f5ed;color:var(--good)}.warn{background:#fff2d8;color:var(--warn)}.bad{background:#fde8e7;color:var(--bad)}.na{background:#edf0f2;color:#5d6974}
+button{border:0;border-radius:9px;padding:9px 12px;background:var(--accent);color:#fff;font-weight:650;cursor:pointer}button.secondary{background:#e9eef3;color:#17212b}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+label{display:block;font-size:13px;font-weight:650;margin:9px 0 4px}input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;font:inherit;background:#fff}
+small{color:var(--muted)}
+.modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;padding:18px}.modal.show{display:flex}.modalbox{background:#fff;border-radius:16px;padding:18px;max-width:560px;width:100%;max-height:90vh;overflow:auto}.modalbox h2{margin-top:0}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
+@media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>✈️ N9474W — AVIATES Inspection Tracker</h1>
+  <p>Piper PA-28-235 Cherokee • Personal aircraft maintenance dashboard</p>
+</header>
+<main>
+  <section class="summary">
+    <div class="stat"><b id="currentHobbs">—</b><span>Current Hobbs</span></div>
+    <div class="stat"><b id="currentTach">—</b><span>Current Tach</span></div>
+    <div class="stat"><b id="dueCount">0</b><span>Due / overdue</span></div>
+    <div class="stat"><b id="nextDue">—</b><span>Next due</span></div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>AVIATES</h2>
+      <div id="items"></div>
+      <div class="actions">
+        <button onclick="openLog()">＋ Log inspection</button>
+        <button class="secondary" onclick="openSettings()">Aircraft settings</button>
+        <button class="secondary" onclick="exportData()">Export backup</button>
+        <button class="secondary" onclick="document.getElementById('importFile').click()">Import backup</button>
+        <input id="importFile" type="file" accept=".json" style="display:none" onchange="importData(event)">
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Flight / Hobbs tracking</h2>
+      <div id="hoursInfo"></div>
+      <div class="actions"><button onclick="openFlight()">＋ Log flight</button></div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+      <h2>Recent maintenance</h2>
+      <div id="history"></div>
+    </section>
+  </div>
+
+  <footer>Personal tracking aid — verify all maintenance and inspection status against the aircraft records, applicable ADs, POH/maintenance data, and current FAA regulations.</footer>
+</main>
+
+<div class="modal" id="modal"><div class="modalbox"><div id="modalContent"></div></div></div>
+
+<script>
+const KEY="n9474w_aviates_v1";
+const defaults={
+ aircraft:{tail:"N9474W",model:"Piper PA-28-235 Cherokee",hobbs:0,tach:0},
+ settings:{ifr:true, hire:false, vor:true},
+ inspections:{
+  annual:{date:"",hobbs:"",tach:"",notes:""},
+  vor:{date:"",hobbs:"",tach:"",notes:""},
+  hundred:{date:"",hobbs:"",tach:"",notes:""},
+  ads:{date:"",hobbs:"",tach:"",notes:""},
+  transponder:{date:"",hobbs:"",tach:"",notes:""},
+  elt:{date:"",hobbs:"",tach:"",notes:""},
+  static:{date:"",hobbs:"",tach:"",notes:""}
+ },
+ history:[], flights:[]
+};
+let data=JSON.parse(localStorage.getItem(KEY)||"null")||structuredClone(defaults);
+function save(){localStorage.setItem(KEY,JSON.stringify(data));render()}
+const defs=[
+ ["annual","A","Annual inspection","12 calendar months","Annual required by 14 CFR 91.409(a)."],
+ ["vor","V","VOR check","30 days","For IFR use of VOR under 91.171."],
+ ["hundred","I","100-hour inspection","100 hours","Conditional: generally required for certain for-hire passenger operations or flight instruction for hire under 91.409(b)."],
+ ["ads","A","Airworthiness Directives","Per AD","Track applicable ADs and compliance status; intervals vary by AD."],
+ ["transponder","T","Transponder test","24 calendar months","91.413 inspection/test interval."],
+ ["elt","E","ELT inspection","12 calendar months","91.207 inspection; battery replacement/currency also tracked separately."],
+ ["static","S","Altimeter / Static system","24 calendar months","91.411 for IFR in controlled airspace; also required after opening/closing the static system."]
+];
+function parseDate(s){return s?new Date(s+"T12:00:00"):null}
+function addMonths(d,n){let x=new Date(d);x.setMonth(x.getMonth()+n);return x}
+function dueInfo(k){
+ const x=data.inspections[k], d=parseDate(x.date); if(!d)return {status:"Missing",cls:"bad",due:null,text:"No date entered"};
+ if(k==="ads") return {status:"Track",cls:"good",due:null,text:"Check applicable AD intervals"};
+ if(k==="hundred"){ if(!data.settings.hire)return {status:"N/A",cls:"na",due:null,text:"Not enabled for current use"}; let due=(Number(x.hobbs)||0)+100; let rem=due-Number(data.aircraft.hobbs||0); return {status:rem<=0?"Overdue":rem<=10?"Soon":"Current",cls:rem<=0?"bad":rem<=10?"warn":"good",due:rem,text:`${due.toFixed(1)} Hobbs`};}
+ let due;
+ if(k==="annual"||k==="elt") due=addMonths(d,12);
+ else if(k==="vor") due=new Date(d.getTime()+30*86400000);
+ else due=addMonths(d,24);
+ const days=Math.ceil((due-new Date())/86400000);
+ return {status:days<0?"Overdue":days<=30?"Soon":"Current",cls:days<0?"bad":days<=30?"warn":"good",due,text:due.toLocaleDateString()};
+}
+function applicable(k){if(k==="vor"||k==="static")return data.settings.ifr; if(k==="hundred")return data.settings.hire; return true}
+function render(){
+ document.getElementById("currentHobbs").textContent=Number(data.aircraft.hobbs||0).toFixed(1);
+ document.getElementById("currentTach").textContent=Number(data.aircraft.tach||0).toFixed(1);
+ let due=[]; let html="";
+ defs.forEach(([k,l,n,intv,desc])=>{
+  if(!applicable(k)){html+=`<div class="item"><div class="row"><div><span class="name">${l} — ${n}</span><div class="sub">Not enabled in settings • ${desc}</div></div><span class="badge na">N/A</span></div></div>`;return}
+  let q=dueInfo(k); if(q.status==="Overdue"||q.status==="Missing")due.push(k);
+  html+=`<div class="item"><div class="row"><div><span class="name">${l} — ${n}</span><div class="sub">${intv} • ${q.text}</div></div><span class="badge ${q.cls}">${q.status}</span></div><div class="actions"><button class="secondary" onclick="edit('${k}')">Update</button></div></div>`;
+ });
+ document.getElementById("items").innerHTML=html;
+ document.getElementById("dueCount").textContent=due.length;
+ document.getElementById("nextDue").textContent=nextDueText();
+ document.getElementById("hoursInfo").innerHTML=`<p><b>Hobbs:</b> ${Number(data.aircraft.hobbs||0).toFixed(1)}</p><p><b>Tach:</b> ${Number(data.aircraft.tach||0).toFixed(1)}</p><small>Use Hobbs for time-based tracking only where appropriate. Keep the aircraft maintenance records as the controlling record.</small>`;
+ let hist=data.history.slice(-8).reverse(); document.getElementById("history").innerHTML=hist.length?hist.map(h=>`<div class="item"><div class="name">${h.title}</div><div class="sub">${h.date} • Hobbs ${h.hobbs||"—"} • ${h.notes||""}</div></div>`).join(""):"<small>No maintenance entries yet.</small>";
+}
+function nextDueText(){
+ let arr=[]; defs.forEach(([k])=>{if(!applicable(k))return;let q=dueInfo(k);if(q.due instanceof Date)arr.push([q.due,k]);});
+ arr.sort((a,b)=>a[0]-b[0]); return arr[0]?arr[0][0].toLocaleDateString():"—";
+}
+function modal(body){document.getElementById("modalContent").innerHTML=body;document.getElementById("modal").classList.add("show")}
+function closeModal(){document.getElementById("modal").classList.remove("show")}
+function openLog(){modal(`<h2>Log inspection / maintenance</h2><label>Item</label><select id="logK">${defs.map(d=>`<option value="${d[0]}">${d[1]} — ${d[2]}</option>`).join("")}</select><label>Date</label><input id="logDate" type="date" value="${new Date().toISOString().slice(0,10)}"><label>Hobbs</label><input id="logHobbs" type="number" step=".1" value="${data.aircraft.hobbs}"><label>Tach</label><input id="logTach" type="number" step=".1" value="${data.aircraft.tach}"><label>Notes</label><textarea id="logNotes" rows="4"></textarea><div class="actions"><button onclick="saveLog()">Save</button><button class="secondary" onclick="closeModal()">Cancel</button></div>`)}
+function saveLog(){let k=document.getElementById("logK").value,x=data.inspections[k];x.date=document.getElementById("logDate").value;x.hobbs=document.getElementById("logHobbs").value;x.tach=document.getElementById("logTach").value;x.notes=document.getElementById("logNotes").value;data.history.push({title:defs.find(d=>d[0]===k)[2],date:x.date,hobbs:x.hobbs,notes:x.notes});data.aircraft.hobbs=Number(x.hobbs||data.aircraft.hobbs);data.aircraft.tach=Number(x.tach||data.aircraft.tach);save();closeModal()}
+function edit(k){let x=data.inspections[k], n=defs.find(d=>d[0]===k);modal(`<h2>${n[1]} — ${n[2]}</h2><p><small>${n[4]}</small></p><label>Completed / checked date</label><input id="eDate" type="date" value="${x.date}"><label>Hobbs at completion</label><input id="eH" type="number" step=".1" value="${x.hobbs}"><label>Tach at completion</label><input id="eT" type="number" step=".1" value="${x.tach}"><label>Notes / shop / reference</label><textarea id="eN" rows="5">${x.notes||""}</textarea><div class="actions"><button onclick="saveEdit('${k}')">Save</button><button class="secondary" onclick="closeModal()">Cancel</button></div>`)}
+function saveEdit(k){let x=data.inspections[k];x.date=eDate.value;x.hobbs=eH.value;x.tach=eT.value;x.notes=eN.value;data.history.push({title:defs.find(d=>d[0]===k)[2],date:x.date,hobbs:x.hobbs,notes:x.notes});save();closeModal()}
+function openFlight(){modal(`<h2>Log flight</h2><label>Date</label><input id="fDate" type="date" value="${new Date().toISOString().slice(0,10)}"><label>Ending Hobbs</label><input id="fH" type="number" step=".1" value="${data.aircraft.hobbs}"><label>Ending Tach</label><input id="fT" type="number" step=".1" value="${data.aircraft.tach}"><label>Notes</label><textarea id="fN" rows="3"></textarea><div class="actions"><button onclick="saveFlight()">Save</button><button class="secondary" onclick="closeModal()">Cancel</button></div>`)}
+function saveFlight(){let old=Number(data.aircraft.hobbs), nh=Number(fH.value);data.flights.push({date:fDate.value,hobbs:nh,tach:Number(fT.value),duration:Math.max(0,nh-old),notes:fN.value});data.aircraft.hobbs=nh;data.aircraft.tach=Number(fT.value);save();closeModal()}
+function openSettings(){modal(`<h2>Aircraft settings</h2><label>Tail number</label><input id="sTail" value="${data.aircraft.tail}"><label>Model</label><input id="sModel" value="${data.aircraft.model}"><label>Current Hobbs</label><input id="sH" type="number" step=".1" value="${data.aircraft.hobbs}"><label>Current Tach</label><input id="sT" type="number" step=".1" value="${data.aircraft.tach}"><label><input id="sIFR" type="checkbox" ${data.settings.ifr?"checked":""} style="width:auto"> IFR equipment/checks enabled</label><label><input id="sHire" type="checkbox" ${data.settings.hire?"checked":""} style="width:auto"> 100-hour requirement enabled</label><div class="actions"><button onclick="saveSettings()">Save</button><button class="secondary" onclick="closeModal()">Cancel</button></div>`)}
+function saveSettings(){data.aircraft.tail=sTail.value;data.aircraft.model=sModel.value;data.aircraft.hobbs=Number(sH.value);data.aircraft.tach=Number(sT.value);data.settings.ifr=sIFR.checked;data.settings.hire=sHire.checked;save();closeModal()}
+function exportData(){let blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="N9474W-aviates-backup.json";a.click();URL.revokeObjectURL(a.href)}
+function importData(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{data=JSON.parse(r.result);save();alert("Backup imported.");}catch{alert("That file is not a valid N9474W backup.");}};r.readAsText(f)}
+render();
+</script>
+</body>
+</html>
